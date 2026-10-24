@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#14121c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>The Twenty-Fourth — what your telescope would have seen</title>
+<style>
+  :root{
+    --dusk:#14121c; --stone:#2a2633; --lamp:#ffe8be; --glow:#ffd696; --ink:#e9e2d6; --dim:#8a8394; --rim:#3b3546;
+  }
+  #sky{position:fixed;inset:0;pointer-events:none;z-index:0}
+  #sky i{position:absolute;width:2px;height:2px;border-radius:50%;background:#fff6e0;opacity:.15;animation:tw var(--d) ease-in-out var(--w) infinite alternate}
+  #sky i.big{width:3px;height:3px;box-shadow:0 0 6px rgba(255,236,200,.7)}
+  @keyframes tw{from{opacity:.08}to{opacity:var(--o)}}
+  #stage{z-index:1}
+  header .t{display:block;font-size:15px;letter-spacing:.14em;color:var(--lamp);margin-bottom:4px}
+  @media (prefers-reduced-motion: reduce){#sky i{animation:none;opacity:var(--o)}}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0;background:var(--dusk);color:var(--ink);font-family:Georgia,"Times New Roman",serif;overflow:hidden;touch-action:none}
+  #stage{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+  header{padding:18px 16px 0;text-align:center;letter-spacing:.08em;font-size:12px;color:var(--dim);text-transform:uppercase}
+  #wheelwrap{position:relative;width:min(92vw,520px);aspect-ratio:1;margin:14px auto 0;flex:0 0 auto}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
+  canvas.dragging{cursor:grabbing}
+  #pointer{position:absolute;left:50%;top:-6px;transform:translateX(-50%);width:0;height:0;border-left:11px solid transparent;border-right:11px solid transparent;border-top:20px solid var(--glow);filter:drop-shadow(0 0 8px rgba(255,214,150,.6));pointer-events:none}
+  #year{position:absolute;left:50%;top:50%;transform:translate(-50%,-52%);font-size:min(17vw,92px);line-height:1;color:var(--lamp);text-shadow:0 0 24px rgba(255,214,150,.35);pointer-events:none;font-variant-numeric:tabular-nums}
+  #hint{position:absolute;left:50%;top:66%;transform:translateX(-50%);font-size:13px;color:var(--dim);pointer-events:none;letter-spacing:.04em;transition:opacity .4s}
+  #card{width:min(92vw,520px);margin:18px auto 0;padding:0 4px 24px;overflow:auto;flex:1 1 auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;opacity:0;transform:translateY(8px);transition:opacity .35s,transform .35s}
+  #card.on{opacity:1;transform:none}
+  #card h2{margin:0 0 6px;font-weight:normal;font-size:20px;color:var(--lamp)}
+  #card p{margin:0 0 12px;font-size:17px;line-height:1.5}
+  #card .src{font-size:12px;color:var(--dim);letter-spacing:.03em}
+  #card .sky{margin:14px 0 12px;padding-top:12px;border-top:1px solid var(--rim);font-size:15px;line-height:1.5;color:var(--dim);font-style:italic}
+  #card .sky b{font-style:normal;font-weight:normal;color:var(--lamp);letter-spacing:.06em;font-size:11px;text-transform:uppercase;display:block;margin-bottom:4px}
+  #card textarea{width:100%;min-height:140px;background:var(--stone);color:var(--ink);border:1px solid var(--rim);border-radius:10px;padding:12px;font:inherit;font-size:16px;line-height:1.45;resize:vertical;outline:none}
+  #card textarea:focus{border-color:var(--glow)}
+  #card .yours{font-size:12px;color:var(--dim);margin:8px 0 6px;letter-spacing:.04em;text-transform:uppercase}
+  #tools{display:flex;gap:8px;justify-content:center;margin:10px 0 0;flex-wrap:wrap}
+  button{background:transparent;color:var(--dim);border:1px solid var(--rim);border-radius:999px;padding:7px 14px;font:inherit;font-size:13px;letter-spacing:.04em;cursor:pointer}
+  button:active{color:var(--lamp);border-color:var(--glow)}
+  #file{display:none}
+</style>
+</head>
+<body>
+<div id="sky" aria-hidden="true"></div>
+<div id="stage">
+  <header><span class="t">The Twenty-Fourth</span>what your telescope would have seen · spin the wheel</header>
+  <div id="wheelwrap">
+    <canvas id="c"></canvas>
+    <div id="pointer"></div>
+    <div id="year">2026</div>
+    <div id="hint">drag, let go</div>
+  </div>
+  <div id="card"></div>
+  <div id="tools">
+    <button id="export" title="save everything you've written to a file">keep</button>
+    <button id="import" title="bring a saved file back in">bring back</button>
+    <input id="file" type="file" accept="application/json">
+  </div>
+</div>
+
+<script>
+(() => {
+  // ---------- the years ----------
+  const FIRST = 1926, WEDDING = 2026;
+  const LAST = Math.max(WEDDING, new Date().getFullYear());   // the wheel grows one year at a time, as the years come. No button; it just happens.
+  const N = LAST - FIRST + 1;
+  const STEP = (Math.PI * 2) / N;                        // one year per detent
+
+  // ---------- state ----------
+  let theta = 0;              // wheel angle (rad). year under the pointer = index(theta)
+  let omega = 0;              // angular velocity (rad/s)
+  let dragging = false, lastA = 0, lastT = 0, samples = [];
+  let settled = true, lastIdx = -1, landedIdx = -1;
+  let stories = {};
+  let sky = {};
+  const yours = loadYours();
+
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  const yearEl = document.getElementById('year'), hint = document.getElementById('hint'), card = document.getElementById('card');
+
+  const idxOf = t => { let i = Math.round(-t / STEP) % N; if (i < 0) i += N; return i; };
+  const yearOf = i => FIRST + i;
+  const startIdx = WEDDING - FIRST;
+  theta = -startIdx * STEP;
+
+  // ---------- size ----------
+  let W = 0, H = 0, DPR = 1;
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio || 1, 3);
+    const r = cv.getBoundingClientRect(); W = r.width; H = r.height;
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    draw();
+  }
+  window.addEventListener('resize', resize);
+
+  // ---------- the click ----------
+  let ac = null;
+  function click(strength){
+    try {
+      if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+      if (ac.state === 'suspended') ac.resume();
+      const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(), f = ac.createBiquadFilter();
+      o.type = 'square'; o.frequency.value = 1600 + Math.random() * 300;
+      f.type = 'lowpass'; f.frequency.value = 2400;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12 * strength, t + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
+      o.connect(f); f.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + 0.035);
+    } catch (e) {}
+    if (navigator.vibrate) navigator.vibrate(strength > 0.6 ? 10 : 6);
+  }
+
+  // ---------- drawing ----------
+  function draw(){
+    const cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2 - 6;
+    ctx.clearRect(0, 0, W, H);
+
+    // rim glow
+    const g = ctx.createRadialGradient(cx, cy, R * 0.55, cx, cy, R);
+    g.addColorStop(0, 'rgba(255,214,150,0.00)'); g.addColorStop(1, 'rgba(255,214,150,0.07)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+
+    // disc
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.fillStyle = '#1b1824'; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = '#3b3546'; ctx.stroke();
+
+    // ticks — the wheel rotates, the pointer is fixed at the top
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(theta);
+    for (let i = 0; i < N; i++){
+      const y = yearOf(i), a = i * STEP - Math.PI / 2;
+      const dec = y % 10 === 0, five = y % 5 === 0, future = y > WEDDING, wed = y === WEDDING;
+      const len = dec ? R * 0.14 : five ? R * 0.09 : R * 0.055;
+      ctx.strokeStyle = wed ? '#ffe8be' : future ? '#4a4356' : dec ? '#cfc6b8' : '#7a7386';
+      ctx.lineWidth = wed ? 3 : dec ? 2 : 1;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * (R - 4), Math.sin(a) * (R - 4));
+      ctx.lineTo(Math.cos(a) * (R - 4 - len), Math.sin(a) * (R - 4 - len));
+      ctx.stroke();
+      if (dec || wed){
+        ctx.save(); ctx.translate(Math.cos(a) * (R - len - 18), Math.sin(a) * (R - len - 18));
+        ctx.rotate(a + Math.PI / 2);
+        ctx.fillStyle = wed ? '#ffe8be' : future ? '#5c5468' : '#a9a1b0';
+        ctx.font = `${wed ? 13 : 11}px Georgia, serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(y), 0, 0); ctx.restore();
+      }
+    }
+    ctx.restore();
+
+    // hub
+    ctx.beginPath(); ctx.arc(cx, cy, R * 0.52, 0, Math.PI * 2);
+    ctx.fillStyle = '#14121c'; ctx.fill(); ctx.strokeStyle = '#2f2a3a'; ctx.lineWidth = 1; ctx.stroke();
+
+    const i = idxOf(theta); yearEl.textContent = yearOf(i);
+    yearEl.style.color = yearOf(i) > WEDDING ? '#8a8394' : '#ffe8be';
+  }
+
+  // ---------- physics ----------
+  // A roulette wheel: nearly free when it's flying, then the drag comes up out of the floor as it slows.
+  const FAST = 8;              // rad/s — above this it's flying
+  const FRICTION_FAST = 0.35;  // per second at full speed — glass
+  const FRICTION_SLOW = 2.8;   // per second once it's slowed — water on the blades
+  const DRAG = 0.5;            // constant decel (rad/s²) — the boat's own weight; stops it crawling
+  const PAWL = 0.97, PAWL_BELOW = 3.0;   // the pawl only bites once it's slow enough to feel each year
+  const DETENT = 7.0;          // spring toward the nearest year when slow
+  const SETTLE_W = 0.35;       // below this, the detent takes over
+  let lastFrame = 0;
+  function frame(ts){
+    requestAnimationFrame(frame);
+    if (!lastFrame) lastFrame = ts;
+    const dt = Math.min(0.05, (ts - lastFrame) / 1000); lastFrame = ts;
+    if (!dragging){
+      if (Math.abs(omega) > SETTLE_W){
+        const s = Math.min(1, Math.abs(omega) / FAST);                       // 1 = flying, 0 = crawling
+        const fr = FRICTION_FAST + (FRICTION_SLOW - FRICTION_FAST) * (1 - s) * (1 - s);
+        omega *= Math.exp(-fr * dt);
+        omega -= Math.sign(omega) * Math.min(Math.abs(omega), DRAG * dt);
+        theta += omega * dt;
+        settled = false;
+      } else if (!settled){
+        // spring to nearest detent
+        const target = -Math.round(-theta / STEP) * STEP;
+        const d = target - theta;
+        omega = omega * 0.82 + d * DETENT * dt * 10;
+        theta += omega * dt;
+        if (Math.abs(d) < 0.0015 && Math.abs(omega) < 0.02){ theta = target; omega = 0; settled = true; land(); }
+      }
+    }
+    const i = idxOf(theta);
+    if (i !== lastIdx){
+      if (lastIdx !== -1){ click(Math.min(1, Math.abs(omega) / 6 + 0.35)); if (!dragging && Math.abs(omega) < PAWL_BELOW) omega *= PAWL; }
+      lastIdx = i;
+      if (!settled || dragging) card.classList.remove('on');
+    }
+    draw();
+  }
+  requestAnimationFrame(frame);
+
+  // ---------- touch ----------
+  function angleAt(e){
+    const r = cv.getBoundingClientRect();
+    return Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2));
+  }
+  cv.addEventListener('pointerdown', e => {
+    cv.setPointerCapture(e.pointerId); dragging = true; cv.classList.add('dragging');
+    lastA = angleAt(e); lastT = performance.now(); samples = []; omega = 0; hint.style.opacity = 0;
+    try { if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)(); if (ac.state === 'suspended') ac.resume(); } catch (err) {}
+  });
+  cv.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const a = angleAt(e), t = performance.now();
+    let d = a - lastA; if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2;
+    theta += d; samples.push({ d, dt: (t - lastT) / 1000 }); if (samples.length > 6) samples.shift();
+    lastA = a; lastT = t; settled = false;
+  });
+  const release = e => {
+    if (!dragging) return; dragging = false; cv.classList.remove('dragging');
+    const recent = samples.filter(s => s.dt > 0).slice(-4);
+    const sd = recent.reduce((x, s) => x + s.d, 0), st = recent.reduce((x, s) => x + s.dt, 0);
+    omega = st > 0 ? Math.max(-14, Math.min(14, sd / st)) : 0;
+    omega *= 1 + (Math.random() - 0.5) * 0.2;                 // no two flicks are the same; a real wheel doesn't repeat
+    if (performance.now() - lastT > 120) omega = 0;        // held still, then let go: no fling
+    settled = false;
+  };
+  cv.addEventListener('pointerup', release); cv.addEventListener('pointercancel', release);
+
+  // ---------- landing ----------
+  function land(){
+    const i = idxOf(theta), y = yearOf(i);
+    if (i === landedIdx && card.classList.contains('on')) return;
+    landedIdx = i;
+    if (navigator.vibrate) navigator.vibrate([18, 40, 12]);
+    card.innerHTML = '';
+    if (y <= WEDDING){
+      const s = stories[String(y)];
+      if (s){
+        const h = document.createElement('h2'); h.textContent = s.title || String(y);
+        const p = document.createElement('p'); p.textContent = s.text || '';
+        card.append(h, p);
+        if (s.source){ const sr = document.createElement('div'); sr.className = 'src'; sr.textContent = s.source; card.append(sr); }
+      } else {
+        const h = document.createElement('h2'); h.textContent = String(y);
+        card.append(h);
+        if (!sky[String(y)]){ const p = document.createElement('p'); p.textContent = 'Nothing on the page for this one yet.'; p.style.color = '#8a8394'; card.append(p); }
+      }
+      addSky(y);
+    } else {
+      addSky(y);
+      const lab = document.createElement('div'); lab.className = 'yours'; lab.textContent = `${y} · yours to write`;
+      const ta = document.createElement('textarea'); ta.placeholder = `24 October ${y}. What happened.`;
+      ta.value = yours[String(y)] || '';
+      ta.addEventListener('input', () => { yours[String(y)] = ta.value; saveYours(); });
+      card.append(lab, ta);
+    }
+    card.classList.add('on');
+  }
+
+  function addSky(y){
+    const t = sky[String(y)]; if (!t) return;
+    const d = document.createElement('div'); d.className = 'sky';
+    const b = document.createElement('b'); b.textContent = y > WEDDING ? `24 October ${y}, nine at night — the sky, worked out ahead` : `24 October ${y}, nine at night, over Eastern Canada`;
+    d.append(b, document.createTextNode(t)); card.append(d);
+  }
+
+  // ---------- theirs, kept on the phone ----------
+  function loadYours(){ try { return JSON.parse(localStorage.getItem('twentyfourth.yours') || '{}'); } catch (e) { return {}; } }
+  function saveYours(){ try { localStorage.setItem('twentyfourth.yours', JSON.stringify(yours)); } catch (e) {} }
+  document.getElementById('export').addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify(yours, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'twenty-fourth-yours.json'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+  document.getElementById('import').addEventListener('click', () => document.getElementById('file').click());
+  document.getElementById('file').addEventListener('change', e => {
+    const f = e.target.files[0]; if (!f) return;
+    f.text().then(t => { try { Object.assign(yours, JSON.parse(t)); saveYours(); land(); } catch (err) {} });
+  });
+
+  // ---------- stories ----------
+  Promise.all([
+    fetch('stories.json').then(r => r.json()).catch(() => ({})),
+    fetch('sky.json').then(r => r.json()).catch(() => ({}))
+  ]).then(([st, sk]) => { stories = st || {}; sky = sk || {}; landedIdx = -1; land(); });
+
+  // ---------- the stars behind everything ----------
+  (function(){
+    const sk = document.getElementById('sky'); const n = Math.round(Math.min(160, innerWidth * innerHeight / 5200));
+    for (let i = 0; i < n; i++){
+      const st = document.createElement('i');
+      if (Math.random() < 0.08) st.className = 'big';
+      st.style.left = (Math.random() * 100) + '%'; st.style.top = (Math.random() * 100) + '%';
+      st.style.setProperty('--o', (0.35 + Math.random() * 0.6).toFixed(2));
+      st.style.setProperty('--d', (2 + Math.random() * 5).toFixed(1) + 's');
+      st.style.setProperty('--w', (-Math.random() * 6).toFixed(1) + 's');
+      sk.appendChild(st);
+    }
+  })();
+
+  // ---------- offline ----------
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+  resize(); setTimeout(resize, 50);
+})();
+</script>
+</body>
+</html>
